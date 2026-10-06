@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Feed Rescue - keep your feeds after 13 November</title>
+<meta name="description" content="Paste your OPML: every subreddit feed (reddit.com/r/...) gets open-web alternatives (Lemmy communities, official project forums, Hacker News, news search). Runs in your browser - nothing is uploaded.">
+<style>
+:root{--bg:#0F141B;--panel:#161D26;--line:#2A3340;--fg:#FFF3DC;--mu:#9A927F;--gold:#F2C25B;--ok:#7FD38A}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}
+main{max-width:900px;margin:0 auto;padding:24px 16px 60px}a{color:var(--gold)}h1{margin:.2em 0 .1em;font-size:2em}
+.mu{color:var(--mu);font-size:14px}textarea{width:100%;min-height:150px;background:#06090D;color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font:13px/1.4 ui-monospace,monospace}
+button,.file{background:var(--gold);color:#12161B;border:0;border-radius:10px;padding:10px 16px;font-weight:700;font-size:15px;cursor:pointer}
+button[disabled]{opacity:.4;cursor:default}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 0}
+.card h3{margin:0 0 6px;font-size:17px;overflow-wrap:anywhere}.card label{display:flex;gap:8px;align-items:flex-start;margin:4px 0;overflow-wrap:anywhere}
+.tag{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:0 6px;color:var(--mu);margin-left:4px}
+.none{color:var(--mu)}#sum{font-weight:700}input[type=file]{display:none}
+</style></head><body><main>
+<p class="mu"><a href="https://localhavenstore.github.io/">Localhaven</a> · free tool</p>
+<h1>Feed Rescue</h1>
+<p><b>Reddit's RSS feeds stop on 13 November 2026.</b> Paste or open your feed reader's OPML export. For every subreddit feed in it
+(reddit.com/r/...), Feed Rescue suggests open feeds on the same topic - the most active <b>Lemmy</b> community, the project's <b>official forum</b>,
+<b>Hacker News</b> or a <b>news search</b> - and gives you a new OPML to import.</p>
+<p class="mu">Runs only in your browser: your OPML is never uploaded, and this page makes no requests while you use it.
+Suggestions are alternatives on the same topic, not copies of the subreddit.</p>
+
+<div class="row"><label class="file" for="f">Open OPML file</label><input id="f" type="file" accept=".opml,.xml,text/xml">
+<span class="mu">or paste it below</span></div>
+<textarea id="t" placeholder="&lt;opml version=&quot;2.0&quot;&gt; ... &lt;/opml&gt;" spellcheck="false"></textarea>
+<div class="row"><button id="go">Find alternatives</button><span id="sum"></span></div>
+<div id="res"></div>
+<div id="out" hidden>
+  <div class="row"><label><input type="radio" name="keep" value="drop" checked> remove the reddit.com feeds</label>
+  <label><input type="radio" name="keep" value="keep"> keep them (they stop on 13 Nov)</label></div>
+  <div class="row"><button id="dl">Download new OPML</button><span class="mu">Your other feeds and folders are kept with all their settings.</span></div>
+</div>
+
+<h2>How it works</h2>
+<ul><li>It finds subreddit feeds like <code>reddit.com/r/selfhosted/.rss</code> (also old.reddit, /new, /top, ?sort=, r/a+b). Feeds of single posts are left as they are.</li>
+<li>Lemmy: communities with the same name on large general instances, at least <span id="mm"></span> monthly active users; the busiest one is suggested.
+Data: the public <a href="https://data.lemmyverse.net/">lemmyverse</a> dataset (<span id="built"></span>).</li>
+<li>Official forums: a hand-checked list of project forums (n8n, Home Assistant, Nextcloud, Docker, Fedora, ...), every feed tested before publishing.</li>
+<li>Always offered: a Hacker News keyword feed (hnrss.org) and a news search feed (Google News).</li></ul>
+<p class="mu">Not affiliated with Reddit, Lemmy or any project named. Made with AI assistance, checked by hand. Source: open, MIT.
+More free tools: <a href="https://localhavenstore.github.io/update-watch/">Update Watch</a> (tested "is it safe to update?" verdicts).</p>
+</main>
+<script src="data.js"></script>
+<script>
+"use strict";
+const D = window.FR_DATA, $ = (id) => document.getElementById(id);
+$("mm").textContent = D.min_mau; $("built").textContent = "built " + D.built;
+const HOSTS = new Set(["reddit.com", "www.reddit.com", "old.reddit.com", "np.reddit.com", "new.reddit.com"]);
+// subreddit feeds only: /r/x/.rss, /r/x.rss, /r/x/new/.rss, /r/x/top.rss ... (post/comment feeds are not subreddit feeds)
+const PATH = /^\/r\/([A-Za-z0-9_+]+)(?:\/(?:hot|new|top|rising|controversial|best))?(?:\/\.rss|\.rss)\/?$/i;
+function subsOf(u) {
+  let x; try { x = new URL(u); } catch { return null; }
+  if (!/^https?:$/.test(x.protocol) || !HOSTS.has(x.hostname.toLowerCase())) return null;
+  const m = x.pathname.match(PATH); return m ? m[1].split("+").filter(Boolean) : null;
+}
+const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined;
+let doc = null, found = [];
+function el(tag, attrs, text) { const e = document.createElement(tag); for (const k in attrs || {}) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; return e; }
+function suggestions(sub) {
+  const k = sub.toLowerCase(), s = [], l = own(D.lemmy, k), f = own(D.forums, k), q = encodeURIComponent(sub);
+  if (l) s.push({kind: "Lemmy", title: `${l[2]} - c/${l[1]}@${l[0]}`, note: `${l[3].toLocaleString("en")} monthly users`, url: `https://${l[0]}/feeds/c/${encodeURIComponent(l[1])}.xml?sort=Active`, on: true});
+  if (f) s.push({kind: "forum", title: `official forum - ${new URL(f).hostname}`, note: "latest topics", url: f, on: true});
+  s.push({kind: "HN", title: `Hacker News: "${sub}"`, note: "stories with 10+ points", url: `https://hnrss.org/newest?q=${q}&points=10`, on: !l && !f});
+  s.push({kind: "news", title: `news search: "${sub}"`, note: "Google News", url: `https://news.google.com/rss/search?q=${q}&hl=en-US&gl=US&ceid=US:en`, on: false});
+  return s;
+}
+function analyse() {
+  $("res").replaceChildren(); $("out").hidden = true; found = [];
+  const txt = $("t").value.trim();
+  doc = new DOMParser().parseFromString(txt, "text/xml");
+  if (!txt || doc.getElementsByTagName("parsererror").length || !doc.querySelector("opml")) { $("sum").textContent = "That is not an OPML file."; doc = null; return; }
+  for (const o of doc.querySelectorAll("outline[xmlUrl], outline[xmlurl]")) {
+    const subs = subsOf(o.getAttribute("xmlUrl") || o.getAttribute("xmlurl") || "");
+    if (!subs) continue;
+    for (const sub of subs) found.push({o, sub, sugg: suggestions(sub)});
+  }
+  const subs = new Set(found.map((x) => x.o)).size;
+  $("sum").textContent = found.length ? `${subs} reddit.com feed(s) found` : "No subreddit feeds in this OPML - nothing to rescue.";
+  found.forEach((x, i) => {
+    const c = el("div", {class: "card"}); c.append(el("h3", {}, `r/${x.sub}`));
+    x.sugg.forEach((s, j) => {
+      const lab = el("label"), cb = el("input", {type: "checkbox", "data-i": i, "data-j": j}); cb.checked = s.on;
+      const sp = el("span", {}, s.title); sp.append(el("span", {class: "tag"}, s.kind), el("span", {class: "tag"}, s.note));
+      lab.append(cb, sp); c.append(lab);
+    });
+    if (!own(D.lemmy, x.sub.toLowerCase()) && !own(D.forums, x.sub.toLowerCase())) c.append(el("p", {class: "none"}, "No Lemmy community or official forum with this name - keyword feeds only."));
+    $("res").append(c);
+  });
+  $("out").hidden = !found.length;
+}
+function download() {
+  const drop = document.querySelector("input[name=keep]:checked").value === "drop";
+  const picked = new Map();
+  for (const cb of document.querySelectorAll("#res input[type=checkbox]")) if (cb.checked) {
+    const x = found[+cb.dataset.i], s = x.sugg[+cb.dataset.j];
+    if (!picked.has(x.o)) picked.set(x.o, []); picked.get(x.o).push({sub: x.sub, s});
+  }
+  for (const x of new Set(found.map((f) => f.o))) {
+    for (const {sub, s} of picked.get(x) || []) {
+      const n = doc.createElement("outline"); const name = `${sub} (${s.kind}: ${s.title})`;
+      n.setAttribute("type", "rss"); n.setAttribute("text", name); n.setAttribute("title", name); n.setAttribute("xmlUrl", s.url);
+      x.parentNode.insertBefore(n, x);
+    }
+    if (drop) {                                   // keep anything nested under the removed feed (review r1)
+      while (x.firstChild) x.parentNode.insertBefore(x.firstChild, x);
+      x.parentNode.removeChild(x);
+    }
+  }
+  const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(doc.documentElement);
+  const a = el("a", {href: URL.createObjectURL(new Blob([xml], {type: "text/x-opml"})), download: "feeds-rescued.opml"}); document.body.append(a); a.click(); a.remove();
+  analyse();
+}
+$("go").onclick = analyse; $("dl").onclick = download;
+$("f").onchange = async (e) => { const f = e.target.files[0]; if (f) { $("t").value = await f.text(); analyse(); } };
+</script></body></html>
